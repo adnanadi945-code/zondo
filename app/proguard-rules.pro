@@ -1,0 +1,2 @@
+-keep class com.zondo.app.** { *; }
+-keepattributes *Annotation*
