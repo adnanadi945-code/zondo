@@ -1,0 +1,65 @@
+# Base44 sandbox environment for Zondo.
+#
+# Zondo is a native Android app (Kotlin + Jetpack Compose). There is no web
+# server to start and a browser preview cannot execute an APK, so this sandbox
+# environment builds the real debug APK from the cloned source and serves it,
+# together with the build log, on host port 3000. The preview therefore always
+# shows the current state of this branch's code.
+#
+#   docker compose -f docker-compose.base44.yml up -d
+#       installs the Android SDK (first run only) into a volume, builds the
+#       debug APK and serves the status page on http://localhost:3000
+#
+#   docker compose -f docker-compose.base44.yml run --rm android-build
+#       rebuilds after a code change (then reload the preview)
+#
+# The Android SDK and the Gradle cache live in named volumes so they never end
+# up in the repository. No external credentials are required: the only remote
+# service the app uses is the public https://jsonplaceholder.typicode.com/.
+services:
+  # One-shot: prepares the SDK and builds app-debug.apk into the shared `dist`
+  # volume. Exits 0 even on build failure so `preview` starts and can report it.
+  android-build:
+    image: gradle:8.4-jdk17
+    working_dir: /workspace
+    command: ["bash", "/workspace/.base44/build-android.sh"]
+    environment:
+      ANDROID_HOME: /opt/android-sdk
+      ANDROID_SDK_ROOT: /opt/android-sdk
+      GRADLE_USER_HOME: /gradle-home
+    volumes:
+      - ./:/workspace
+      - android-sdk:/opt/android-sdk
+      - gradle-home:/gradle-home
+      - dist:/dist
+    restart: "no"
+    labels:
+      base44.project: Zondo build
+      base44.kind: worker
+
+  # The preview web entry point: serves the built APK and its build report.
+  preview:
+    image: nginx:alpine
+    ports:
+      - "3000:80"
+    volumes:
+      - dist:/usr/share/nginx/html:ro
+    depends_on:
+      android-build:
+        condition: service_completed_successfully
+    restart: on-failure
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    labels:
+      base44.project: Zondo
+      base44.kind: web
+      base44.port: 3000
+
+volumes:
+  android-sdk:
+  gradle-home:
+  dist:
